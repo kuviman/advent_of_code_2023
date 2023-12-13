@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use itertools::Itertools;
-
 fn solve_line(line: &str) -> u64 {
     let (map, groups) = line.split_once(' ').unwrap();
 
