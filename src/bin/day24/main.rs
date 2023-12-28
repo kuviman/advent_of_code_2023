@@ -1,4 +1,4 @@
-use std::ops::RangeInclusive;
+use std::ops::{Range, RangeInclusive};
 
 use batbox_la::*;
 use batbox_num::*;
@@ -122,9 +122,12 @@ fn main() {
         // cross(a.pos - b.pos, a.vel - b.vel).len() = 0
         // cross(a.pos - c.pos, a.vel - c.vel) = 0
 
+        // p[i] + v[i] * t[i] = p + v * t[i]
+
         let f = |me: Ray<f64>| -> f64 {
             hailstones
                 .iter()
+                .take(5)
                 .map(|stone| {
                     vec3::cross(
                         me.pos - stone.pos.map(|x| x as f64),
@@ -137,16 +140,16 @@ fn main() {
 
         fn rng_descent<const N: usize>(
             initial_guess: [f64; N],
+            mut radius: [f64; N],
             f: impl Fn([f64; N]) -> f64,
         ) -> [f64; N] {
             let mut rng = thread_rng();
-            let mut radius = 1000.0;
             let mut current_best_guess = initial_guess;
-            while radius > 0.1 {
+            while radius.iter().copied().max_by(f64::total_cmp).unwrap() > 0.1 {
                 loop {
                     let guesses = std::iter::repeat_with::<[f64; N], _>(|| {
                         std::array::from_fn(|i| {
-                            current_best_guess[i] + rng.gen_range(-radius..=radius)
+                            current_best_guess[i] + rng.gen_range(-radius[i]..=radius[i])
                         })
                     })
                     .take(100000);
@@ -162,23 +165,35 @@ fn main() {
                         current_best_guess = new_best_guess;
                     }
                 }
-                radius *= 0.7;
+                for x in &mut radius {
+                    *x *= 0.9;
+                }
             }
             current_best_guess
         }
 
         loop {
+            fn find_range(hailstones: &[Ray<i64>], f: impl Fn(&Ray<i64>) -> i64) -> Range<i64> {
+                let f = &f;
+                hailstones.iter().map(f).min().unwrap()..hailstones.iter().map(f).max().unwrap()
+            }
             let guess = Ray {
                 pos: {
                     let [x, y, z] = std::array::from_fn(|i| {
-                        let coords = hailstones.iter().map(|s| s.pos[i]);
-                        thread_rng()
-                            .gen_range(coords.clone().min().unwrap()..coords.clone().max().unwrap())
+                        thread_rng().gen_range(find_range(&hailstones, |stone| stone.pos[i]))
                     });
                     vec3(x, y, z).map(|x| x as f64)
                 },
                 vel: vec3::ZERO,
             };
+            let [rx, ry, rz] = std::array::from_fn(|i| {
+                let range = find_range(&hailstones, |stone| stone.pos[i]);
+                (range.end - range.start) as f64
+            });
+            let [rvx, rvy, rvz] = std::array::from_fn(|i| {
+                let range = find_range(&hailstones, |stone| stone.vel[i]);
+                (range.end - range.start) as f64
+            });
             let [x, y, z, vx, vy, vz] = rng_descent(
                 [
                     guess.pos.x,
@@ -188,6 +203,7 @@ fn main() {
                     guess.vel.y,
                     guess.vel.z,
                 ],
+                [rx, ry, rz, rvx, rvy, rvz],
                 |[x, y, z, vx, vy, vz]| {
                     f(Ray {
                         pos: vec3(x, y, z),
@@ -203,8 +219,32 @@ fn main() {
             //     pos: vec3(24.0, 13.0, 10.0),
             //     vel: vec3(-3.0, 1.0, 2.0),
             // };
+            println!("before rounding");
+            dbg!(me, f(me));
             let me = me.map(|x| x.round());
-            dbg!(f(me));
+            println!("after rounding");
+            dbg!(me, f(me));
+            let me = me.map(|x| x as i64);
+
+            let mut actually_the_answer = true;
+            for &stone in &hailstones {
+                fn check_hits_in_future(ray: Ray<i64>, stone: Ray<i64>) -> bool {
+                    let rel_target = stone.pos - ray.pos;
+                    let rel_vel = ray.vel - stone.vel;
+                    vec3::cross(rel_target, rel_vel) == vec3::ZERO
+                        && vec3::dot(rel_target, rel_vel) >= 0
+                }
+                if !check_hits_in_future(me, stone) || !check_hits_in_future(stone, me) {
+                    actually_the_answer = false;
+                    break;
+                }
+            }
+            if actually_the_answer {
+                println!("WOOOOO");
+                let answer = me.pos.x + me.pos.y + me.pos.z;
+                println!("{answer}");
+                break;
+            }
         }
     }
 }
